@@ -1,9 +1,12 @@
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <termios.h>
 
@@ -24,10 +27,17 @@ enum EditorKey {
 };
 
 // Data
+typedef struct RowStore {
+	int size;
+	char *chars;
+} rstore;
+
 struct EditorConfig {
 	int cx, cy;
 	int screen_rows;
 	int screen_cols;
+	int num_rows;
+	rstore row;
 	struct termios orig_termios;
 };
 
@@ -113,20 +123,22 @@ int editor_read_key() {
 }
 
 int get_cursor_position(int *rows, int *cols) {
-	char buf[32];
+	char buffer[32];
 	unsigned int i = 0;
+	rows = 0;
+	cols = 0;
 
 	if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
 
-	while (i < sizeof(buf) - 1) {
-		if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
-		if (buf[i] == 'R') break;
+	while (i < sizeof(buffer) - 1) {
+		if (read(STDIN_FILENO, &buffer[i], 1) != 1) break;
+		if (buffer[i] == 'R') break;
 		i++;
 	}
 
-	buf[i] = '\0';
+	buffer[i] = '\0';
 
-	if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+	if (buffer[0] != '\x1b' || buffer[1] != '[') return -1;
 
 	return 0;
 }
@@ -143,6 +155,31 @@ int get_window_size(int *rows, int *cols) {
 
 		return 0;
 	}
+}
+
+// File I/O
+void editor_open(char *file_name) {
+	FILE *file_pointer = fopen(file_name, "r");
+	if (!file_pointer) die("fopen");
+
+	char *line = NULL;
+	char line_cap = 0;
+	ssize_t line_len = 0;
+	line_len = getline(&line, &line_cap, file_pointer);
+	if (line_len != -1) {
+		while (line_len > 0 && (line[line_len - 1] == '\n' ||
+								line[line_len - 1] == '\r' ))
+			line_len--;
+
+		Ed.row.size = line_len;
+		Ed.row.chars = malloc(line_len + 1);
+		memcpy(Ed.row.chars, line, line_len);
+		Ed.row.chars[line_len] = '\0';
+		Ed.num_rows = 1;
+	}
+
+	free(line);
+	fclose(file_pointer);
 }
 
 // Append Buffer
@@ -171,25 +208,32 @@ void editor_draw_rows(struct ABuf *ab) {
 	int y = 0;
 
 	for (y = 0; y < Ed.screen_rows; y++) {
-		if (y == Ed.screen_rows / 3) {
-			char welcome[80];
-			int welcome_len = snprintf(welcome, sizeof(welcome), 
-				"DaveEd -- Version %s", DAVE_ED_VERSION);
+		if (y >= Ed.num_rows){
+			if (y == Ed.screen_rows / 3) {
+				char welcome[80];
+				int welcome_len = snprintf(welcome, sizeof(welcome), 
+					"DaveEd -- Version %s", DAVE_ED_VERSION);
 
-			if (welcome_len > Ed.screen_cols) welcome_len = Ed.screen_cols;
+				if (welcome_len > Ed.screen_cols) welcome_len = Ed.screen_cols;
 
-			int padding = (Ed.screen_cols - welcome_len) / 2;
+				int padding = (Ed.screen_cols - welcome_len) / 2;
 
-			if (padding) {
+				if (padding) {
+					abuf_append(ab, "*", 1);
+					padding--;
+				}
+
+				while (padding--) abuf_append(ab, " ", 1);
+
+				abuf_append(ab, welcome, welcome_len);
+			} else {
 				abuf_append(ab, "*", 1);
-				padding--;
 			}
-
-			while (padding--) abuf_append(ab, " ", 1);
-
-			abuf_append(ab, welcome, welcome_len);
 		} else {
-			abuf_append(ab, "*", 1);
+			int length = Ed.row.size;
+
+			if (length > Ed.screen_cols) length = Ed.screen_cols;
+			abuf_append(ab, Ed.row.chars, length);
 		}
 
 		abuf_append(ab, "\x1b[K", 3);
@@ -207,9 +251,9 @@ void editor_refresh_screen() {
 
 	editor_draw_rows(&ab);
 
-	char buf[32];
-	snprintf(buf, sizeof(buf), "\x1b[%d;%dH", Ed.cy + 1, Ed.cx + 1);
-	abuf_append(&ab, buf, strlen(buf));
+	char buffer[32];
+	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", Ed.cy + 1, Ed.cx + 1);
+	abuf_append(&ab, buffer, strlen(buffer));
 
 	abuf_append(&ab, "\x1b[H", 3);
 	abuf_append(&ab, "\x1b[?25l", 6);
@@ -292,12 +336,17 @@ void editor_process_keypress() {
 void init_editor() {
 	Ed.cx = 0;
 	Ed.cy = 0;
+	Ed.num_rows = 0;
 
 	if (get_window_size(&Ed.screen_rows, &Ed.screen_cols) == -1) die("get_window_size");
 }
-int main() {
+
+int main(int argc, char *argv[]) {
 	enable_raw_mode();
 	init_editor();
+	if (argc >= 2) {
+		editor_open(argv[1]);
+	}
 
 	while (1) {
 		editor_refresh_screen();
