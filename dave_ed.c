@@ -16,6 +16,9 @@ enum EditorKey {
 	ARROW_RIGHT = 1001,
 	ARROW_UP = 1002,
 	ARROW_DOWN = 1003,
+	DELETE_KEY,
+	HOME_KEY,
+	END_KEY,
 	PAGE_UP,
 	PAGE_DOWN
 };
@@ -77,8 +80,13 @@ int editor_read_key() {
 				if (read(STDIN_FILENO, &sequence[2], 1) != 1) return '\x1b';
 				if (sequence[2] == '*') {
 					switch (sequence[1]) {
+						case '1': return HOME_KEY;
+						case '3': return DELETE_KEY;
+						case '4': return END_KEY;
 						case '5': return PAGE_UP;
 						case '6': return PAGE_DOWN;
+						case '7': return HOME_KEY;
+						case '8': return END_KEY;
 					}
 				}
 			} else {
@@ -87,7 +95,14 @@ int editor_read_key() {
 					case 'B': return ARROW_DOWN;
 					case 'C': return ARROW_RIGHT;
 					case 'D': return ARROW_LEFT;
+					case 'H': return HOME_KEY;
+					case 'F': return END_KEY;
 				}
+			}
+		} else if (sequence[0] == 'O') {
+			switch (sequence[1]) {
+				case 'H': return HOME_KEY;
+				case 'F': return END_KEY;
 			}
 		}
 
@@ -245,6 +260,14 @@ void editor_process_keypress() {
 	      	write(STDOUT_FILENO, "\x1b[H", 3);
 
 			exit(0);
+			break;
+
+		case HOME_KEY:
+			Ed.cx = 0;
+			break;
+
+		case END_KEY:
+			Ed.cx = Ed.screen_cols - 1;
 			break;
 
 		case PAGE_UP:
