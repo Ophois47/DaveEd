@@ -16,9 +16,9 @@
 
 enum EditorKey {
 	ARROW_LEFT = 1000,
-	ARROW_RIGHT = 1001,
-	ARROW_UP = 1002,
-	ARROW_DOWN = 1003,
+	ARROW_RIGHT,
+	ARROW_UP,
+	ARROW_DOWN,
 	DELETE_KEY,
 	HOME_KEY,
 	END_KEY,
@@ -53,8 +53,7 @@ void die(const char *s) {
 }
 
 void disable_raw_mode() {
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &Ed.orig_termios) == -1)
-		die("tcsetattr");
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &Ed.orig_termios) == -1) die("tcsetattr");
 }
 
 void enable_raw_mode() {
@@ -255,8 +254,8 @@ void editor_refresh_screen() {
 	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", Ed.cy + 1, Ed.cx + 1);
 	abuf_append(&ab, buffer, strlen(buffer));
 
-	abuf_append(&ab, "\x1b[H", 3);
-	abuf_append(&ab, "\x1b[?25l", 6);
+	// abuf_append(&ab, "\x1b[H", 3);
+	abuf_append(&ab, "\x1b[?25h", 6);
 
 	write(STDOUT_FILENO, ab.buffer, ab.len);
 	abuf_free(&ab);
@@ -302,7 +301,6 @@ void editor_process_keypress() {
 		case CTRL_KEY('q'):
 			write(STDOUT_FILENO, "\x1b[2J", 4);
 	      	write(STDOUT_FILENO, "\x1b[H", 3);
-
 			exit(0);
 			break;
 
