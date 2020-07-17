@@ -37,6 +37,7 @@ typedef struct RowStore {
 struct EditorConfig {
 	int cx, cy;
 	int row_offset;
+	int column_offset;
 	int screen_rows;
 	int screen_cols;
 	int num_rows;
@@ -213,6 +214,24 @@ void abuf_free(struct ABuf *ab) {
 }
 
 // Output
+void editor_scroll() {
+	if (Ed.cy < Ed.row_offset) {
+		Ed.row_offset = Ed.cy;
+	}
+
+	if (Ed.cy >= Ed.row_offset + Ed.screen_rows) {
+		Ed.row_offset = Ed.cy - Ed.screen_rows + 1;
+	}
+
+	if (Ed.cx < Ed.column_offset) {
+		Ed.column_offset = Ed.cx;
+	}
+
+	if (Ed.cx >= Ed.column_offset + Ed.screen_rows) {
+		Ed.column_offset = Ed.cx - Ed.screen_cols + 1;
+	}
+}
+
 void editor_draw_rows(struct ABuf *ab) {
 	int y = 0;
 
@@ -241,10 +260,11 @@ void editor_draw_rows(struct ABuf *ab) {
 				abuf_append(ab, "*", 1);
 			}
 		} else {
-			int length = Ed.row[file_row].size;
+			int length = Ed.row[file_row].size - Ed.column_offset;
 
+			if (length < 0) length = 0; 
 			if (length > Ed.screen_cols) length = Ed.screen_cols;
-			abuf_append(ab, Ed.row[file_row].chars, length);
+			abuf_append(ab, &Ed.row[file_row].chars[Ed.column_offset], length);
 		}
 
 		abuf_append(ab, "\x1b[K", 3);
@@ -255,6 +275,8 @@ void editor_draw_rows(struct ABuf *ab) {
 }
 
 void editor_refresh_screen() {
+	editor_scroll();
+
 	struct ABuf ab = ABUF_INIT;
 
 	abuf_append(&ab, "\x1b[?25l", 6);
@@ -263,7 +285,8 @@ void editor_refresh_screen() {
 	editor_draw_rows(&ab);
 
 	char buffer[32];
-	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", Ed.cy + 1, Ed.cx + 1);
+	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", (Ed.cy - Ed.row_offset) + 1, 
+													(Ed.cx - Ed.column_offset) + 1);
 	abuf_append(&ab, buffer, strlen(buffer));
 	abuf_append(&ab, "\x1b[?25h", 6);
 
@@ -273,17 +296,25 @@ void editor_refresh_screen() {
 
 // Input
 void editor_move_cursor(int key) {
+	rstore *row = (Ed.cy >= Ed.num_rows) ? NULL : &Ed.row[Ed.cy];
+
 	switch (key) {
 	case ARROW_LEFT:
 		if (Ed.cx != 0) {
 			Ed.cx--;
+		} else if (Ed.cy > 0) {
+			Ed.cy--;
+			Ed.cx = Ed.row[Ed.cy].size;
 		}
 		
 		break;
 
 	case ARROW_RIGHT:
-		if (Ed.cx != Ed.screen_cols - 1) {
+		if (row && Ed.cx < row -> size) {
 			Ed.cx++;
+		} else if (row && Ed.cx == row -> size) {
+			Ed.cy++;
+			Ed.cx = 0;
 		}
 		
 		break;
@@ -296,11 +327,17 @@ void editor_move_cursor(int key) {
 		break;
 
 	case ARROW_DOWN:
-		if (Ed.cy != Ed.screen_rows - 1) {
+		if (Ed.cy < Ed.num_rows) {
 			Ed.cy++;
 		}
 		
 		break;
+	}
+
+	row = (Ed.cy >= Ed.num_rows) ? NULL : &Ed.row[Ed.cy];
+	int row_length = row ? row -> size : 0;
+	if (Ed.cx > row_length) {
+		Ed.cx = row_length;
 	}
 }
 
@@ -345,6 +382,7 @@ void init_editor() {
 	Ed.cx = 0;
 	Ed.cy = 0;
 	Ed.row_offset = 0;
+	Ed.column_offset = 0;
 	Ed.num_rows = 0;
 	Ed.row = NULL;
 
