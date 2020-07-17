@@ -227,7 +227,7 @@ void editor_scroll() {
 		Ed.column_offset = Ed.cx;
 	}
 
-	if (Ed.cx >= Ed.column_offset + Ed.screen_rows) {
+	if (Ed.cx >= Ed.column_offset + Ed.screen_cols) {
 		Ed.column_offset = Ed.cx - Ed.screen_cols + 1;
 	}
 }
