@@ -352,6 +352,17 @@ void editor_draw_status_bar(struct ABuf *ab) {
 	}
 
 	abuf_append(ab, "\x1b[m", 3);
+	abuf_append(ab, "\r\n", 2);
+}
+
+void editor_draw_message_bar(struct ABuf *ab) {
+	abuf_append(ab, "\x1b[K", 3);
+
+	int message_length = strlen(Ed.status_message);
+
+	if (message_length > Ed.screen_cols) message_length = Ed. screen_cols;
+	if (message_length && time(NULL) - Ed.status_message_time < 5)
+		abuf_append(ab, Ed.status_message, message_length);
 }
 
 void editor_refresh_screen() {
@@ -364,6 +375,7 @@ void editor_refresh_screen() {
 
 	editor_draw_rows(&ab);
 	editor_draw_status_bar(&ab);
+	editor_draw_message_bar(&ab);
 
 	char buffer[32];
 	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", (Ed.cy - Ed.row_offset) + 1, 
@@ -489,7 +501,7 @@ void init_editor() {
 	Ed.status_message_time = 0;
 
 	if (get_window_size(&Ed.screen_rows, &Ed.screen_cols) == -1) die("get_window_size");
-	Ed.screen_rows -= 1;
+	Ed.screen_rows -= 2;
 }
 
 int main(int argc, char *argv[]) {
