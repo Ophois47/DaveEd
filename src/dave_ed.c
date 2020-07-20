@@ -20,6 +20,7 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 enum EditorKey {
+	BACKSPACE = 127,
 	ARROW_LEFT = 1000,
 	ARROW_RIGHT,
 	ARROW_UP,
@@ -228,6 +229,16 @@ void editor_row_insert_character(rstore *row, int at, int c) {
 	row -> size++;
 	row -> chars[at] = c;
 	editor_update_row(row);
+}
+
+// Editor Operations
+void editor_insert_character(int c) {
+	if (Ed.cy == Ed.num_rows) {
+		editor_append_row("", 0);
+	}
+
+	editor_row_insert_character(&Ed.row[Ed.cy], Ed.cx, c);
+	Ed.cx++;
 }
 
 // File I/O
@@ -455,6 +466,10 @@ void editor_process_keypress() {
 	int c = editor_read_key();
 
 	switch(c) {
+		case '\r':
+			// TODO
+			break;
+
 		case CTRL_KEY('q'):
 			write(STDOUT_FILENO, "\x1b[2J", 4);
 	      	write(STDOUT_FILENO, "\x1b[H", 3);
@@ -468,6 +483,12 @@ void editor_process_keypress() {
 		case END_KEY:
 			if (Ed.cy < Ed.num_rows)
 				Ed.cx = Ed.row[Ed.cy].size;
+			break;
+
+		case BACKSPACE:
+		case CTRL_KEY('h'):
+		case DELETE_KEY:
+			// TODO
 			break;
 
 		case PAGE_UP:
@@ -485,6 +506,7 @@ void editor_process_keypress() {
 				while (times--)
 					editor_move_cursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
 			}
+
 			break;
 
 		case ARROW_UP:
@@ -492,6 +514,14 @@ void editor_process_keypress() {
 		case ARROW_LEFT:
 		case ARROW_RIGHT:
 			editor_move_cursor(c);
+			break;
+
+		case CTRL_KEY('l'):
+		case '\x1b':
+			break;
+
+		default:
+			editor_insert_character(c);
 			break;
 	}
 }
