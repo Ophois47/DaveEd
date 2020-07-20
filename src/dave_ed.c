@@ -221,6 +221,15 @@ void editor_append_row(char *s, size_t len) {
 	Ed.num_rows++;
 }
 
+void editor_row_insert_character(rstore *row, int at, int c) {
+	if (at < 0 || at > row -> size) at = row -> size;
+	row -> chars = realloc(row -> chars, row -> size + 2);
+	memmove(&row -> chars[at + 1], &row -> chars[at], row -> size - at + 1);
+	row -> size++;
+	row -> chars[at] = c;
+	editor_update_row(row);
+}
+
 // File I/O
 void editor_open(char *file_name) {
 	free(Ed.file_name);
