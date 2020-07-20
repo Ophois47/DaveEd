@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <termios.h>
+#include <time.h>
 
 // Defines
 #define DAVE_ED_VERSION "0.0.1"
@@ -46,6 +48,9 @@ struct EditorConfig {
 	int screen_cols;
 	int num_rows;
 	rstore *row;
+	char *file_name;
+	char status_message[80];
+	time_t status_message_time;
 	struct termios orig_termios;
 };
 
@@ -218,6 +223,9 @@ void editor_append_row(char *s, size_t len) {
 
 // File I/O
 void editor_open(char *file_name) {
+	free(Ed.file_name);
+	Ed.file_name = strdup(file_name);
+
 	FILE *file_pointer = fopen(file_name, "r");
 	if (!file_pointer) die("fopen");
 
@@ -318,10 +326,32 @@ void editor_draw_rows(struct ABuf *ab) {
 		}
 
 		abuf_append(ab, "\x1b[K", 3);
-		if (y < Ed.screen_rows - 1) {
-			abuf_append(ab, "\r\n", 2);
+		abuf_append(ab, "\r\n", 2);
+	}
+}
+
+void editor_draw_status_bar(struct ABuf *ab) {
+	abuf_append(ab, "\x1b[7m", 4);
+
+	char status[80], rstatus[80];
+	int len = snprintf(status, sizeof(status), "%.20s - %d lines",
+		Ed.file_name ? Ed.file_name : "[No File Name]", Ed.num_rows);
+	int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d", Ed.cy + 1, Ed.num_rows);
+
+	if (len > Ed.screen_cols) len = Ed.screen_cols;
+	abuf_append(ab, status, len);
+
+	while (len < Ed.screen_cols) {
+		if (Ed.screen_cols - len == rlen) {
+			abuf_append(ab, rstatus, rlen);
+			break;
+		} else {
+			abuf_append(ab, " ", 1);
+			len++;
 		}
 	}
+
+	abuf_append(ab, "\x1b[m", 3);
 }
 
 void editor_refresh_screen() {
@@ -333,6 +363,7 @@ void editor_refresh_screen() {
 	abuf_append(&ab, "\x1b[H", 3);
 
 	editor_draw_rows(&ab);
+	editor_draw_status_bar(&ab);
 
 	char buffer[32];
 	snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", (Ed.cy - Ed.row_offset) + 1, 
@@ -342,6 +373,14 @@ void editor_refresh_screen() {
 
 	write(STDOUT_FILENO, ab.buffer, ab.len);
 	abuf_free(&ab);
+}
+
+void editor_set_status_message(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(Ed.status_message, sizeof(Ed.status_message), fmt, ap);
+	va_end(ap);
+	Ed.status_message_time = time(NULL);
 }
 
 // Input
@@ -445,8 +484,12 @@ void init_editor() {
 	Ed.column_offset = 0;
 	Ed.num_rows = 0;
 	Ed.row = NULL;
+	Ed.file_name = NULL;
+	Ed.status_message[0] = '\0';
+	Ed.status_message_time = 0;
 
 	if (get_window_size(&Ed.screen_rows, &Ed.screen_cols) == -1) die("get_window_size");
+	Ed.screen_rows -= 1;
 }
 
 int main(int argc, char *argv[]) {
@@ -455,6 +498,8 @@ int main(int argc, char *argv[]) {
 	if (argc >= 2) {
 		editor_open(argv[1]);
 	}
+
+	editor_set_status_message("HELP: Ctrl-Q to Quit");
 
 	while (1) {
 		editor_refresh_screen();
