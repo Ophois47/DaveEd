@@ -38,6 +38,8 @@ enum EditorKey {
 enum EditorHighlight {
 	HL_NORMAL = 0,
 	HL_COMMENT,
+	HL_KEYWORD1,
+	HL_KEYWORD2,
 	HL_STRING,
 	HL_NUMBER,
 	HL_MATCH
@@ -50,6 +52,7 @@ enum EditorHighlight {
 struct EditorSyntax {
 	char *file_type;
 	char **file_match;
+	char **keywords;
 	char *single_line_comment_start;
 	int flags;
 };
@@ -83,12 +86,16 @@ struct EditorConfig Ed;
 
 // FileTypes
 char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };
+char *C_HL_keywords[] = {
+	"switch", "if", "while", "for", "break", "continue", "return", "else", "struct", "union", "typedef", "static", "enum", "class", "case", "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|", "void|", NULL
+};
 
 // Highlight Database
 struct EditorSyntax HLDB[] = {
 	{
 		"c",
 		C_HL_extensions,
+		C_HL_keywords,
 		"//",
 		HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
 	},
@@ -225,6 +232,7 @@ void editor_update_syntax(rstore *row) {
 
 	if (Ed.syntax == NULL) return;
 
+	char **keywords = Ed.syntax -> keywords;
 	char *scs = Ed.syntax -> single_line_comment_start;
 	int scs_len = scs ? strlen(scs) : 0;
 	int previous_seperator = 1;
@@ -277,6 +285,28 @@ void editor_update_syntax(rstore *row) {
 			}
 		}
 
+		if (previous_seperator) {
+			int j = 0;
+			for (j = 0; keywords[j]; j++) {
+				int klen = strlen(keywords[j]);
+				int keyword_two = keywords[j][klen - 1] == '|';
+				if (keyword_two) klen--;
+
+				if (!strncmp(&row -> render[i], keywords[j], klen) && is_seperator(row -> render[i + klen])) {
+					memset(&row -> highlight[i], keyword_two ? HL_KEYWORD2 : HL_KEYWORD1, klen);
+					i += klen;
+
+					break;
+				}
+			}
+
+			if (keywords[j] != NULL) {
+				previous_seperator = 0;
+
+				continue;
+			}
+		}
+
 		previous_seperator = is_seperator(c);
 		i++;
 	}
@@ -285,6 +315,8 @@ void editor_update_syntax(rstore *row) {
 int editor_syntax_to_color(int highlight) {
 	switch (highlight) {
 		case HL_COMMENT: return 36;
+		case HL_KEYWORD1: return 34;
+		case HL_KEYWORD2: return 32;
 		case HL_STRING: return 35;
 		case HL_NUMBER: return 31;
 		case HL_MATCH: return 34;
