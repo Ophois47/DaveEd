@@ -35,12 +35,19 @@ enum EditorKey {
 	PAGE_DOWN
 };
 
+enum EditorHighlight {
+	HL_NORMAL = 0,
+	HL_NUMBER,
+	HL_MATCH
+};
+
 // Data
 typedef struct RowStore {
 	int size;
 	int rsize;
 	char *chars;
 	char *render;
+	unsigned char *highlight;
 } rstore;
 
 struct EditorConfig {
@@ -179,6 +186,27 @@ int get_window_size(int *rows, int *cols) {
 	}
 }
 
+// Syntax Highlighting
+void editor_update_syntax(rstore *row) {
+	row -> highlight = realloc(row -> highlight, row -> rsize);
+	memset(row -> highlight, HL_NORMAL, row -> rsize);
+
+	int i;
+	for (i = 0; i < row -> rsize; i++) {
+		if (isdigit(row -> render[i])) {
+			row -> highlight[i] = HL_NUMBER;
+		}
+	}
+}
+
+int editor_syntax_to_color(int highlight) {
+	switch (highlight) {
+		case HL_NUMBER: return 31;
+		case HL_MATCH: return 34;
+		default: return 37;
+	}
+}
+
 // Row Operations
 int editor_row_cx_to_rx(rstore *row, int cx) {
 	int rx = 0;
@@ -227,6 +255,8 @@ void editor_update_row(rstore *row) {
 
 	row -> render[idx] = '\0';
 	row -> rsize = idx;
+
+	editor_update_syntax(row);
 }
 
 void editor_insert_row(int at, char *s, size_t len) {
@@ -242,6 +272,7 @@ void editor_insert_row(int at, char *s, size_t len) {
 
 	Ed.row[at].rsize = 0;
 	Ed.row[at].render = NULL;
+	Ed.row[at].highlight = NULL;
 	editor_update_row(&Ed.row[at]);
 
 	Ed.num_rows++;
@@ -251,6 +282,7 @@ void editor_insert_row(int at, char *s, size_t len) {
 void editor_free_row(rstore *row) {
 	free(row -> render);
 	free(row -> chars);
+	free(row -> highlight);
 }
 
 void editor_delete_row(int at) {
@@ -412,6 +444,14 @@ void editor_save() {
 void editor_find_callback(char *query, int key) {
 	static int last_match = -1;
 	static int direction = 1;
+	static int saved_highlighted_line = 0;
+	static char *saved_highlight = NULL;
+
+	if (saved_highlight) {
+		memcpy(Ed.row[saved_highlighted_line].highlight, saved_highlight, Ed.row[saved_highlighted_line].rsize);
+		free(saved_highlight);
+		saved_highlight = NULL;
+	}
 
 	if (key == '\r' || key == '\x1b') {
 		last_match = -1;
@@ -443,6 +483,10 @@ void editor_find_callback(char *query, int key) {
 			Ed.cx = editor_row_rx_to_cx(row, match - row -> render);
 			Ed.row_offset = Ed.num_rows;
 
+			saved_highlighted_line = current;
+			saved_highlight = malloc(row -> rsize);
+			memcpy(saved_highlight, row -> highlight, row -> rsize);
+			memset(&row -> highlight[match - row -> render], HL_MATCH, strlen(query));
 			break;
 		}
 	}
@@ -513,10 +557,8 @@ void editor_scroll() {
 
 void editor_draw_rows(struct ABuf *ab) {
 	int y = 0;
-
 	for (y = 0; y < Ed.screen_rows; y++) {
 		int file_row = y + Ed.row_offset;
-
 		if (file_row >= Ed.num_rows){
 			if (Ed.num_rows == 0 && y == Ed.screen_rows  / 3) {
 				char welcome[80];
@@ -540,10 +582,35 @@ void editor_draw_rows(struct ABuf *ab) {
 			}
 		} else {
 			int length = Ed.row[file_row].rsize - Ed.column_offset;
-
 			if (length < 0) length = 0; 
 			if (length > Ed.screen_cols) length = Ed.screen_cols;
-			abuf_append(ab, &Ed.row[file_row].render[Ed.column_offset], length);
+
+			char *c = &Ed.row[file_row].render[Ed.column_offset];
+			unsigned char *highlight = &Ed.row[file_row].highlight[Ed.column_offset];
+			int current_color = -1;
+			int j = 0;
+			for (j = 0; j < length; j++) {
+				if (highlight[j] == HL_NORMAL) {
+					if (current_color != -1) {
+						abuf_append(ab, "\x1b[39m", 5);
+						current_color = -1;
+					}
+
+					abuf_append(ab, &c[j], 1);
+				} else {
+					int color = editor_syntax_to_color(highlight[j]);
+					if (color != current_color) {
+						current_color = color;
+						char buf[16];
+						int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+						abuf_append(ab, buf, clen);
+					}
+					
+					abuf_append(ab, &c[j], 1);
+				}
+			}
+
+			abuf_append(ab, "\x1b[39m", 5);
 		}
 
 		abuf_append(ab, "\x1b[K", 3);
