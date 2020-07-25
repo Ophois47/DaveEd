@@ -4,4 +4,4 @@ Text editor in C
 Example Use:
  ~# ./DaveEd test.txt
  
- ./DaveEd <your_text_file.txt>
+ ./DaveEd <your_source_file.c>
