@@ -63,6 +63,8 @@ struct EditorConfig Ed;
 
 // Prototypes
 void editor_set_status_message(const char *fmt, ...);
+void editor_refresh_screen();
+char *editor_prompt(char *prompt, void (*callback)(char *, int));
 
 // Terminal
 void die(const char *s) {
@@ -188,6 +190,20 @@ int editor_row_cx_to_rx(rstore *row, int cx) {
 	}
 
 	return rx;
+}
+
+int editor_row_rx_to_cx(rstore *row, int rx) {
+	int cur_rx = 0;
+	int cx = 0;
+	for (cx = 0; cx < row -> size; cx++) {
+		if (row -> chars[cx] == '\t')
+			cur_rx += (DAVE_ED_TAB_STOP - 1) - (cur_rx % DAVE_ED_TAB_STOP);
+		cur_rx++;
+
+		if (cur_rx > rx) return cx;
+	}
+
+	return cx;
 }
 
 void editor_update_row(rstore *row) {
@@ -360,7 +376,14 @@ void editor_open(char *file_name) {
 }
 
 void editor_save() {
-	if (Ed.file_name == NULL) return;
+	if (Ed.file_name == NULL) {
+		Ed.file_name = editor_prompt("Save as: %s (ESC to Cancel)", NULL);
+		if (Ed.file_name == NULL) {
+			editor_set_status_message("Save Aborted");
+
+			return;
+		}
+	}
 
 	int length = 0;
 	char *buffer = editor_rows_to_string(&length);
@@ -383,6 +406,63 @@ void editor_save() {
 
 	free(buffer);
 	editor_set_status_message("Unable to Save! I/O Error: %s", strerror(errno));
+}
+
+// Find
+void editor_find_callback(char *query, int key) {
+	static int last_match = -1;
+	static int direction = 1;
+
+	if (key == '\r' || key == '\x1b') {
+		last_match = -1;
+		direction = 1;
+		return;
+	} else if (key == ARROW_RIGHT || key == ARROW_DOWN) {
+		direction = 1;
+	} else if (key == ARROW_LEFT || key == ARROW_UP) {
+		direction = -1;
+	} else {
+		last_match = -1;
+		direction = 1;
+	}
+
+	if (last_match == -1) direction = 1;
+	int current = last_match;
+	int i;
+	for (i = 0; i < Ed.num_rows; i++) {
+		current += direction;
+		if (current == -1) current = Ed.num_rows - 1;
+		else if (current == Ed.num_rows) current = 0;
+
+		rstore *row = &Ed.row[current];
+		char *match = strstr(row -> render, query);
+
+		if (match) {
+			last_match = current;
+			Ed.cy = current;
+			Ed.cx = editor_row_rx_to_cx(row, match - row -> render);
+			Ed.row_offset = Ed.num_rows;
+
+			break;
+		}
+	}
+}
+
+void editor_find() {
+	int saved_cx = Ed.cx;
+	int saved_cy = Ed.cy;
+	int saved_column_offset = Ed.column_offset;
+	int saved_row_offset = Ed.row_offset;
+
+	char *query = editor_prompt("Search: %s (ESC Cancel/Arrows/Enter Confirm)", editor_find_callback);
+	if (query) {
+		free(query);
+	} else {
+		Ed.cx = saved_cx;
+		Ed.cy = saved_cy;
+		Ed.column_offset = saved_column_offset;
+		Ed.row_offset = saved_row_offset;
+	}
 }
 
 // Append Buffer
@@ -538,6 +618,46 @@ void editor_set_status_message(const char *fmt, ...) {
 }
 
 // Input
+char *editor_prompt(char *prompt, void (*callback)(char *, int)) {
+	size_t bufsize = 128;
+	char *buf = malloc(bufsize);
+
+	size_t buflen = 0;
+	buf[0] = '\0';
+
+	while(1) {
+		editor_set_status_message(prompt, buf);
+		editor_refresh_screen();
+
+		int c = editor_read_key();
+		if (c == DELETE_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+			if (buflen != 0) buf[--buflen] = '\0';
+		} else if (c == '\x1b') {
+			editor_set_status_message("");
+			if (callback) callback(buf, c);
+			free(buf);
+
+			return NULL;
+		} else if (c == '\r') {
+			if (buflen != 0) {
+				editor_set_status_message("");
+				if (callback) callback(buf, c);
+				return buf;
+			}
+		} else if (!iscntrl(c) && c < 128) {
+			if (buflen == bufsize - 1) {
+				bufsize *= 2;
+				buf = realloc(buf, bufsize);
+			}
+
+			buf[buflen++] = c;
+			buf[buflen] = '\0';
+		}
+
+		if (callback) callback(buf, c);
+	}
+}
+
 void editor_move_cursor(int key) {
 	rstore *row = (Ed.cy >= Ed.num_rows) ? NULL : &Ed.row[Ed.cy];
 
@@ -619,6 +739,10 @@ void editor_process_keypress() {
 				Ed.cx = Ed.row[Ed.cy].size;
 			break;
 
+		case CTRL_KEY('f'):
+			editor_find();
+			break;
+
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DELETE_KEY:
@@ -688,7 +812,7 @@ int main(int argc, char *argv[]) {
 		editor_open(argv[1]);
 	}
 
-	editor_set_status_message("HELP: Ctrl-S to Save | Ctrl-Q to Quit");
+	editor_set_status_message("HELP: Ctrl-S to Save | Ctrl-Q to Quit | Ctrl-F = Find");
 
 	while (1) {
 		editor_refresh_screen();
